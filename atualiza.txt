@@ -1,0 +1,257 @@
+#!/bin/bash
+#================================================================================
+# Aplicação..: atualiza.sh
+# Propósito..: Atualização do sistema operacional com log
+# Autores....: Sydnei Lucchesi Le Petit / Gemini
+# Criação....: 17 de outubro de 2026
+# Atualização: 26/10/2026
+# Etapas de Funcionamento:
+# 1. Aguarda a opção de execução ou não da rotina 
+#    Se a opção for SIM
+# 2. CONFIGURAÇÃO DE DIRETÓRIOS E LOGS (Prática de mercado)
+#    DEFINIÇÃO DE CORES E VARIÁVEIS DO SISTEMA PARA APRESENTAÇÃO EM TELA
+#    INICIANDO AS ROTINA DE MANUTENÇÃO
+# 3. ATUALIZA A LISTA DE PACOTES E AS INFORMAÇÕES DOS REPOSITÓRIOS CADASTRADOS NA INSTALAÇÃO DO LINUX, SEM PROMOVER QUALQUER ALTERAÇÃO
+# 4. ATUALIZA OS PACOTES A PARTIR DOS REPOSITÓRIOS OFICIAIS CADASTRADOS NA INSTALAÇÃO DO LINUX
+# 5. LIMPA AS DEPENDÊNCIAS DESNECESSÁRIAS
+# 6. REMOVE ARQUIVOS E PACOTES EM CACHE
+# 7. ELIMINA ARQUIVOS DA LIXEIRA
+# 8. FINAL DA EXECUÇÃO COM CONFERÊNCIA DO LOG
+# 9. LIMPA O SSD ONDE ESTÁ INSTALADO O SISTEMA - A SER IMPLEMENTADO
+#==================================================
+#  1. AGUARDA A OPÇÃO DE EXECUÇÃO OU NÃO DA ROTINA
+#==================================================
+# Configurações do Timeout (em segundos)
+TIMEOUT_TOTAL=10
+SEGUNDOS_PASSADOS=0
+clear
+echo "Esteja certo de que deseja REALMENTE executar esta rotina de atualizações."
+echo "Entre as tarefas que serão executadas está a limpeza da lixeira e de pacotes desnecessários."
+echo -e "\a"
+echo -n "Deseja continuar? [ENTER = Sim / ESC = Não] (Tempo limite: ${TIMEOUT_TOTAL}s): "
+
+while true; do
+    # Lê 1 caractere com timeout de 1 segundo para podermos atualizar o contador do script
+    read -s -r -N 1 -t 1 tecla
+    read_status=$?
+
+    # 1. Verifica se o read saiu por timeout (status maior que 128)
+    if [ $read_status -gt 128 ]; then
+        ((SEGUNDOS_PASSADOS++))
+        
+        # Se atingiu o tempo limite total, toma uma ação padrão (ex: assume NÃO)
+        if [ $SEGUNDOS_PASSADOS -ge $TIMEOUT_TOTAL ]; then
+            echo -e "\n\n[Tempo esgotado! Opção padrão selecionada: NÃO]"
+            # Insira aqui o código para o timeout / "Não"
+            break
+        fi
+        continue
+    fi
+
+    # 2. Se a tecla for ENTER (SIM)
+    if [[ -z "$tecla" || "$tecla" == $'\n' || "$tecla" == $'\r' ]]; then
+        echo -e "\n\n[Opção selecionada: SIM]"
+    	echo "Iniciando a rotina..."
+
+    	#============================================================
+    	#  2. CONFIGURAÇÃO DE DIRETÓRIOS E LOGS (Prática de mercado)
+    	#============================================================
+
+    	# Define o caminho diretamente para a pasta do root, independente de quem rodar o script 
+    	PASTA_LOGS="/root/Logs"
+
+    	# 2. VERIFICAÇÃO: Se o diretório NÃO existir (! -d), ele é criado em /root.
+    	if [ ! -d "PASTA_LOGS" ]; then
+        	echo "Diretório de logs não encontrado.  Criando em: $PASTA_LOGS"
+        	mkdir -p "$PASTA_LOGS"
+    	fi
+
+    	# 3. Define o arquivo de log único, principal, fixo e centralizado
+    	ARQUIVO_LOG="$PASTA_LOGS/manutencao_sistema.log"
+
+    	#===========================================
+    	# DEFINIÇÃO DE CORES E VARIÁVEIS DO SISTEMA
+    	#===========================================
+    	VERDE='\e[1;32m'
+    	VERMELHO='\e[1;31m'
+    	PADRAO='\e[0m'
+
+    	#====================================
+    	# INICIANDO AS ROTINAS DE MANUTENÇÃO
+    	# ===================================
+    	clear
+    	echo "================================================================================"
+    	echo -e "Iniciando as rotinas de manutenção..."
+
+    	#=======================================================================================================================================
+    	#  3. ATUALIZA A LISTA DE PACOTES E AS INFORMAÇÕES DOS REPOSITÓRIOS CADASTRADOS NA INSTALAÇÃO DO LINUX, SEM PROMOVER QUALQUER ALTERAÇÃO
+    	#=======================================================================================================================================
+    	echo "================================================================================"
+    	echo -e
+    	echo "apt update: atualiza a lista de pacotes e as informações dos repositórios cadastrados na instalação do linux, sem promover qualquer alteração."
+    	echo -e
+    	apt update
+    	status=$?
+
+    	# Captura a data exata do fim do comando
+    	DATA_ATUAL=$(date "+[%Y%m%d-%H:%M:%S]")
+
+    	if [ "$status" -eq 0 ]; then
+        	# Mostra na tela o retorno em verde para o SUCESSO
+        	echo -e "${VERDE}[SUCESSO] apt update: Executado!${PADRAO}"
+
+        	# Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+        	echo "$DATA_ATUAL [SUCESSO] apt update: Executado!" >> "$ARQUIVO_LOG"
+    	else
+        	#  Mostra na tela o retorno em vermelho
+        	echo -e "${VERMELHO}[ERRO] apt update: Falha ao executar. VERIFIQUE!${PADRAO}"
+
+        	# Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+        	echo "$DATA_ATUAL [ERRO] apt update: Falha ao executar.  VERIFIQUE!" >> "$ARQUIVO_LOG"
+    	fi
+    	#===============================================================================================
+    	#  4. ATUALIZA OS PACOTES A PARTIR DOS REPOSITÓRIOS OFICIAIS CADASTRADOS NA INSTALAÇÃO DO LINUX
+    	#===============================================================================================
+    	echo "================================================================================"
+    	echo -e
+    	echo "apt full-upgrade: Atualiza os pacotes a partir dos repositórios oficiais cadastrados na instalação do Linux."
+    	echo -e
+    	apt full-upgrade -y
+    	status=$?
+
+    	# Captura a data exata do fim do comando
+    	DATA_ATUAL=$(date "+[%Y%m%d-%H:%M:%S]")
+
+	    if [ "$status" -eq 0 ]; then
+	        # Mostra na tela o retorno em verde para o SUCESSO
+	        echo -e "${VERDE}[SUCESSO] apt full-upgrade: Executado!${PADRAO}"
+
+	        # Salva no arquivio de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [SUCESSO] apt full-upgrade: Executado!" >> "$ARQUIVO_LOG"
+	    else
+	        # Mostra na tela o retorno em vermelho
+	        echo -e "${VERMELHO}[ERRO] apt full-upgrade: Falha ao executar. VERIFIQUE!${PADRAO}"
+
+	        # salva no arquivo de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [ERRO] apt full-upgrade: Falha ao executar. VERIFIQUE!" >> "$ARQUIVO_LOG"
+	    fi
+	    #==========================================
+	    #  5. LIMPA AS DEPENDÊNCIAS DESNECESSÁRIAS
+	    #========================================== 
+	    echo "================================================================================"
+	    echo -e
+	    echo "apt autoremove: Remove pacotes e dependências desnecessárias..."
+	    echo -e
+	    apt autoremove -y
+	    status=$?
+
+	    # Captura a data exata do fim do comando
+	    DATA_ATUAL=$(date "+[%Y%m%d-%H:%M:%S]")
+	
+	    if [ "$status" -eq 0 ]; then
+	        # Mostra na tela o retorno em verde para o SUCESSO
+	        echo -e "${VERDE}[SUCESSO] apt autoremove: Executado!${PADRAO}"
+	
+	        # Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [SUCESSO] apt autoremove: Executado!" >> "$ARQUIVO_LOG"
+	    else
+	        # Mostra na tela o retorno em vermelho
+	        echo -e "${VERMELHO}[ERRO] apt autoremove: Falha ao executar. VERIFIQUE!${PADRAO}"
+
+	        # Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [ERRO] apt autoremove: Falha ao executar. VERIFIQUE!" >> "$ARQUIVO_LOG"
+	    fi
+	    #========================================
+	    #  6. REMOVE ARQUIVOS E PACOTES EM CACHE
+	    #========================================
+	    echo "================================================================================"
+	    echo -e
+	    echo apt clean: Remove arquivos e pacotes em cache...
+	    echo -e
+	    apt clean
+	    status=$?
+
+	    # Captura a data exata do fim do comando
+	    DATA_ATUAL=$(date "+[%Y%m%d-%H:%M:%S]")
+
+	    if [ "$status" -eq 0 ]; then
+	        # Mostra na tela o retorno em verde para o SUCESSO
+	        echo -e "${VERDE}[SUCESSO] apt clean: Executado!${PADRAO}"
+
+	        # Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [SUCESSO] apt clean: Executado!" >> "$ARQUIVO_LOG"
+	    else
+	        # Mostra na tela o retorno em vermelho
+	        echo -e "${VERMELHO}[ERRO] apt clean: Falha ao executar.  VERIFIQUE!${PADRAO}"
+
+	        # Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [ERRO] apt clean: Falha ao executar.  VERIFIQUE!" >> "$ARQUIVO_LOG"
+	    fi
+	    #=================================
+	    #  7. ELIMINA ARQUIVOS DA LIXEIRA
+	    #=================================
+	    # Como rodamos como root, precisamos limpar a lixeira do usuário que rodou o script
+	    # Se o root real rodar direto, limpamos a lixeira do root.
+
+	    echo "================================================================================"
+	    echo -e
+	    echo rm -rf ~/.local/share/Trash/: Eliminação de arquivos da lixeira...
+	    echo -e
+	    rm -rf ~/.local/share/Trash/*
+	    status=$?
+
+	    # Captura a data exata do fim do comando
+	    DATA_ATUAL=$(date "+[%Y%m%d-%H:%M:%S]")
+
+	    if [ "$status" -eq 0 ]; then
+	        # Mostra na tela o retorno em verde para o SUCESSO
+	        echo -e "${VERDE}[SUCESSO] rm -rf ~/.local/share/Trash/*, Executado!${PADRAO}"
+
+	        # Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [SUCESSO] rm -rf ~/.local/share/Trash/*, Executado!" >> "$ARQUIVO_LOG"
+	    else
+	        # Mostra na tela o retorno em vermelho
+	        echo -e "${VERMELHO}[ERRO] rm -rf ~/.local/share/Trash/*: Falha ao executar. VERIFIQUE!${PADRAO}"
+
+	        # Salva no arquivo de log (0 >> adiciona ao final do arquivo)
+	        echo "$DATA_ATUAL [ERRO] rm -rf ~/.local/share/Trash/: Falha ao executar. VERIFIQUE!" >> "$ARQUIVO_LOG"
+	    fi
+	    #==============================================
+	    #  8. FINAL DA EXECUÇÃO COM CONFERÊNCIA DO LOG 
+	    #==============================================
+	    # Conferência do conteúdo do arquivo de log
+
+	    echo "================================================================================"
+	    echo -e
+	    echo tail -n 20 /root/Logs/manutencao_sistema.log
+	    echo -e
+	    echo -e "${VERDE}Manutenção concluída! Histórico salvo em $ARQUIVO_LOG  Até a próxima.${PADRAO}"
+	    sudo tail -n 20 $ARQUIVO_LOG
+	    echo "================================================================================" >> "$ARQUIVO_LOG"
+	    echo -e
+	    echo -e
+	    echo -e
+	    #===============================================
+	    #  9. LIMPA O SSD ONDE ESTÁ INSTALADO O SISTEMA
+	    #=============================================== 
+	    #  O comando fstrim no Linux é usado para informar a uma unidade de estado sólido (SSD) 
+	    #  quais blocos de dados não estão mais em uso pelo sistema operacional,
+	    #  permitindo que o disco limpe essas áreas e recupere o desempenho...'
+	    #  Não inserir esse comando neste script de manutenção do sistema.
+	    #  Foi verificado se já estava automatizado com o comando: sudo systemctl status fstrim.timer
+	    #  Como não estava, foi inserido na automação com o comando: sudo systemctl enable --now fstrim.timer        
+        break
+    fi
+    # 3. Se a tecla for ESC
+    if [[ "$tecla" == $'\e' ]]; then
+        # Verifica se foi apenas o ESC (não), ou o início de uma seta do teclado
+        read -s -r -N 1 -t 0.1 proxima_tecla
+        if [[ -z "$proxima_tecla" ]]; then
+            echo -e "\n\n[Opção selecionada: NÃO] OPERAÇÃO CANCELADA!"
+            break
+        fi
+    fi
+done
+#=================
+# FINAL DA ROTINA
+#=================
