@@ -1,0 +1,313 @@
+#!/bin/bash
+#================================================================================
+# Aplicação..: bkp.sh
+# Propósito..: Geração de arquivos compactados para backup do usuário com log
+# Autores....: Sydnei Lucchesi Le Petit / Gemini
+# Criação....: 17 de outubro de 2026
+# Atualização: 26/10/2026
+# Etapas de Funcionamento:
+# 0. Opção sobre a execução da rotina
+# 1. Mapeamento dinâmico de privilégios (sudo / root)
+# 2. Preparação de diretórios e logs
+# 3. Rotina de compactação de diretórios (versão zstd)
+# 4. Rotina de transferência dos arquivos para hdd externo
+# 5. Opção para limpeza dos arquivos locais - Opcional
+#================================================================================
+clear
+echo "======================================================================================================="
+echo "ATENÇÃO: Esta rotina executa procedimentos de backup que podem ser demorados."
+echo "Serão feitas compactações de cópias de arquivos, diretórios visíveis e ocultos, do usuário e do sistema"
+echo "e posteriormente poderão ser copiados para um HDD externo e apagados do HDD local."
+echo ""
+read -p "Deseja executar esta rotina? (s/n): " resposta
+
+# Transforma a resposta em letra minúscula para evitar problemas com 'S' ou 'N'
+resposta=$(echo "$resposta" | tr '[:upper:]' '[:lower:]')
+
+# Verifica a resposta do usuário
+if [ "$resposta" = "n" ] || [ "$resposta" = "não" ]; then
+
+    # Se a resposta for NÃO
+    echo "Você optou por NÃO executar esta rotina. OPERAÇÃO CANCELADA!"
+else
+
+    #======================================================
+    #  1. MAPEAMENTO DINÂMICO DE PRIVILÉGIOS (SUDO / ROOT)
+    #======================================================
+    # 1. Verifica se o script foi invocado via SUDO
+    if [ -n "$SUDO_USER" ]; then
+        REAL_USER="$SUDO_USER"
+        TARGET_DIR=$(getent passwd "$SUDO_USER" | cut -d: -f6)
+    else
+        REAL_USER="$USER"
+        TARGET_DIR="$HOME"
+    fi
+
+    BACKUP_DIR="$TARGET_DIR/backups"
+
+    #=====================================
+    #  2. PREPARAÇÃO DE DIRETÓRIOS E LOGS
+    #===================================== 
+
+    # DEFINIÇÃO: Caminho do arquivo de LOG (sempre na pasta do root) 
+    PASTA_LOGS="/root/Logs"
+
+    # VERIFICAÇÃO: Se o diretório do LOG NÃO existir (! -d), ele é criado em /root.
+    if [ ! -d "$PASTA_LOGS" ]; then
+        echo "Diretório de logs não encontrado.  Criando em: $PASTA_LOGS"
+        mkdir -p "$PASTA_LOGS" 2>/dev/null
+        if [ $? -ne 0 ]; then
+            echo "AVISO: Não foi possível criar a pasta de logs em /root."
+	    PASTA_LOGS="$BACKUP_DIR"
+	    mkdir -p "$PASTA_LOGS"
+        fi
+    fi
+
+    # DEFINIÇÃO: Nome do arquivo de LOG desta rotina
+    ARQUIVO_LOG="$PASTA_LOGS/backup.log"
+
+    # Define o caminho de destino dos arquivos compactados de backup no REAL_USER mapeado
+    # Mudado de /home/$USER para $BACKUP_DIR para blindar o comando SUDO
+    DIRETORIO_BKP="$BACKUP_DIR"
+    
+    # VERIFICAÇÃO: Se o diretório NÃO EXISTIR, ele é criado de forma segura
+    if [ ! -d "$DIRETORIO_BKP" ]; then
+    	echo "Diretório de destino dos backups não encontrado.  Criando a pasta $DIRETORIO_BKP"
+    	mkdir -p "$DIRETORIO_BKP"
+    fi
+
+    # DEFINIÇÃO: Cores e variáveis do sistema para mensagens na tela
+    VERDE='\e[1;32m'
+    VERMELHO='\e[1;31m'
+    PADRAO='\e[0m'
+    #======================================================================
+    #  3. INÍCIO DA ROTINA DE COMPACTAÇÃO DE DIRETÓRIOS E ARQUIVOS (ZSTD)
+    #======================================================================
+    echo -e "${VERDE}Iniciando a rotina de backup...${PADRAO}"
+    echo "======================================================================"
+
+    # 1. Verifica se o diretório 'backups' existe, caso contrário, cria-o
+    if [ ! -d "$BACKUP_DIR" ]; then
+        echo -e "${VERMELHO}Diretório $BACKUP_DIR não encontrado. Criando...${PADRAO}"
+        mkdir -p "$BACKUP_DIR"
+    fi
+
+    # Se foi o root/sudo que criou a pasta de backups na home, devolve a propriedade ao usuário real
+    if [ -d "$BACKUP_DIR" ] && [ "$REAL_USER" != "root" ]; then
+        chown "$REAL_USER":"$(id -gn "$REAL_USER")" "$BACKUP_DIR" 2>/dev/null
+    fi
+
+    # 2. Definição explícita dos arquivos/pastas ocultas essenciais que queremos salvar
+    # Você pode adicionar ou remover itens desta lista conforme sentir necessidade!
+    OCULTOS_ESSENCIAIS=( ".config" ".ssh" ".local" ".bashrc" ".bash_profile" ".profile" )
+
+    echo -e "${VERDE}Iniciando a compactação seletiva dos itens em $TARGET_DIR...${PADRAO}"
+    echo "======================================================================"
+    # Gera o timestamp (LOG_TIME), para este ciclo de execução com a máscara: %Y%m%d-%H%M%S
+    #     %Y = Ano (4 dígitos), %m = Mês (2 dígitos), %d = Dia (2 dígitos)
+    #     %H = Hora (2 dígitos - 24 horas), %M = Minutos (2 dígitos), %S = Segundos (2 Dígitos)
+    LOG_TIME=$(date "+%Y%m%d-%H%M%S")
+
+    # -----------------------------------------------------------------
+    # PASSO A: Compactar todos os ARQUIVOS avulsos (Scripts, etc) em /HOME/$USER
+    # -----------------------------------------------------------------
+    OUTPUT_HOME_FILES="$BACKUP_DIR/${LOG_TIME}-bkp-arquivos-home.tar.zst"
+
+    # Verifica se existem arquivos comuns (-maxdepth 1 -type f) na raiz da Home do usuário
+    # O grep garante que não vai tentar compactar se não houver nenhum arquivo solto
+    if find "$TARGET_DIR" -maxdepth 1 -type f | grep -q .; then
+        echo -e "[Arquivos visíveis] Compactando: ${LOG_TIME}-bkp-arquivos-home"
+        
+        # O find localiza os arquivos e o tar os compacta juntos de forma segura
+        if find "$TARGET_DIR" -maxdepth 1 -type f -print0 | tar -caf "$OUTPUT_HOME_FILES" --null -T - 2>/dev/null; then
+            echo "[SUCESSO] ${LOG_TIME}-bkp-arquivos-home" >> "$ARQUIVO_LOG" 2>/dev/null
+            [ "$REAL_USER" != "root" ] && chown "$REAL_USER":"$(id -gn "$REAL_USER")" "$OUTPUT_HOME_FILES" 2>/dev/null
+        else
+            echo "[FALHA] ${LOG_TIME}-bkp-arquivos-home" >> "$ARQUIVO_LOG" 2>/dev/null
+        fi
+    fi
+
+    # -----------------------------------------------------------------
+    # PASSO B: Loop Principal - Agora focado APENAS em DIRETÓRIOS (-type d)
+    # -----------------------------------------------------------------
+    find "$TARGET_DIR" -maxdepth 1 -type d ! -path "$TARGET_DIR" ! -path "$BACKUP_DIR" | while read -r ITEM; do
+        BASE_NAME=$(basename "$ITEM")
+        LOG_TIME=$(date "+%Y%m%d-%H%M%S")
+        OUTPUT_FILE="$BACKUP_DIR/${LOG_TIME}-bkp-${BASE_NAME}.tar.zst"
+
+        if [[ "$BASE_NAME" == .* ]]; then
+            permitido=false
+            for essencial in "${OCULTOS_ESSENCIAIS[@]}"; do
+                if [ "$BASE_NAME" = "$essencial" ]; then
+                    permitido=true
+                    break
+                fi
+            done
+
+            [ "$permitido" = false ] && continue 
+            echo -e "[Ocultos Vitais]    Compactando: ${LOG_TIME}-bkp-${BASE_NAME}"    
+        else 
+            echo -e "[Pastas Visíveis]   Compactando: ${LOG_TIME}-bkp-${BASE_NAME}"
+        fi
+
+        if tar -caf "$OUTPUT_FILE" -C "$TARGET_DIR" "$BASE_NAME" 2>/dev/null; then
+            echo "[SUCESSO] ${LOG_TIME}-bkp-${BASE_NAME}" >> "$ARQUIVO_LOG" 2>/dev/null
+        else
+            echo "[FALHA]   ${LOG_TIME}-bkp-${BASE_NAME}" >> "$ARQUIVO_LOG" 2>/dev/null
+        fi
+
+        if [ -f "$OUTPUT_FILE" ] && [ "$REAL_USER" != "root" ]; then
+            chown "$REAL_USER":"$(id -gn "$REAL_USER")" "$OUTPUT_FILE" 2>/dev/null
+        fi
+    done
+
+    echo -e "${VERDE}Processo concluído! Os arquivos foram salvos em: $BACKUP_DIR${PADRAO}"
+
+    #=============================================================
+    #  4. ROTINA DE TRANSFERÊNCIA DOS ARQUIVOS PARA O HDD EXTERNO
+    #=============================================================
+    echo "================================================================================"
+    read -p "Deseja fazer a transferência dos arquivos compactados para o HDD Externo? (s/n): " resp_transferir
+    resp_transferir=$(echo "$resp_transferir" | tr '[:upper:]' '[:lower:]')
+
+    if [ "$resp_transferir" = "n" ] || [ "$resp_transferir" = "não" ]; then
+        LOG_TIME=$(date "+%Y-%m-%d %H:%M:%S")
+        echo -e "${VERMELHO}[AVISO] Transferência rejeitada pelo usuário.${PADRAO}"
+        echo "[$LOG_TIME] AVISO: Não foi feita a transferência dos arquivos de backup para o HDD externo." >> "$ARQUIVO_LOG" 2>/dev/null
+        echo "Por favor, efetue os procedimentos de cópia manualmente, se necessário."
+    else
+        # Loop de detecção e seleção do HDD externo
+        while true; do
+            echo ""
+            echo "================================================================================"
+            echo " DISPOSITIVOS EXTERNOS DETECTADOS NO SISTEMA"
+	        echo "================================================================================"
+
+	        # Cria a lista trazendo apenas o conteúdo de /media/usuario/
+	        shopt -s nullglob
+	        hds_conectados=( /media/$REAL_USER/* )
+	        shopt -u nullglob
+            
+	        # Se a lista estiver vazia, avisa o operador
+	        if [ ${#hds_conectados[@]} -eq 0 ]; then
+                echo -e "${VERMELHO}[AVISO] Nenhum dispositivo externo foi encontrado montado.${PADRAO}"
+                read -p "Por favor, conecte um HDD Externo e pressione [ENTER] para reavaliar (ou 'sair'): " opcao_falha
+	            if [ "$(echo "$opcao_falha" | tr '[:upper:]' '[:lower:]')" = "sair" ]; then
+	                echo "Operação cancelada!"
+		            break 2 # Sai da rotina de backup
+	            fi
+	            continue
+	        fi
+	        # Mostra as opções numeradas na tela
+	        i=1
+	        for hd in "${hds_conectados[@]}"; do
+		        detalhes_hd=$(lsblk -no LABEL,MODEL $(findmnt -n -o SOURCE "$hd" 2>/dev/null) 2>/dev/null | head -n 1)
+	            if [ -n "$detalhes_hd" ]; then
+	                echo " $i) $(basename "$hd") [$detalhes_hd]"
+	            else
+                    echo " $i) $(basename "$hd")"
+	            fi
+	            i=$((i + 1))
+	        done
+            
+	        echo "================================================================================"
+	        read -p "Selecione o número do HDD de destino (ou 'sair'): " escolha_hd
+            
+            if [ "$(echo "$escolha_hd" | tr '[:upper:]' '[:lower:]')" = "sair" ]; then
+	            echo "Operação cancelada pelo operador."
+		        break 2
+	        fi
+	        # Valida se a escolha é um número válido e está dentro do limite do Array
+	        if [[ "$escolha_hd" =~ ^[0-9]+$ ]] && [ "$escolha_hd" -ge 1 ] && [ "$escolha_hd" -le "${#hds_conectados[@]}" ]; then
+	            # Define a variável global do HD com base na escolha (ajustando o índice do Array que começa em 0)
+	            HDD_EXTERNO="${hds_conectados[$((escolha_hd - 1))]}"
+	            echo -e "${VERDE}[OK] Destino definido: $HDD_EXTERNO${PADRAO}"
+	            break # Sai do loop de seleção e segue para a cópia física dos arquivos
+	        else
+                echo -e "${VERMELHO}Opção inválida! Selecione um número da lista.${PADRAO}"
+            fi
+        done
+        
+        # 1. Varre os arquivos gerados dentro da pasta de backups locais no formato .tar.zst
+        #    Usamos nullglob temporário para evitar erros caso a pasta esteja vazia
+        shopt -s nullglob
+        arquivos_locais=( "$BACKUP_DIR"/*.tar.zst )
+        shopt -u nullglob
+
+        for arquivo_origem in "${arquivos_locais[@]}"; do
+            nome_bkp=$(basename "$arquivo_origem")
+
+            # Loop contínuo para garantir a verificação de conexão por arquivo
+            while true; do
+                if [ ! -d "$HDD_EXTERNO" ]; then
+                    LOG_TIME=$(date "+%Y%m%d-%H%M%S")
+                    echo -e "${VERMELHO}[ERRO] O HDD Externo não está conectado ou montado em: $HDD_EXTERNO${PADRAO}"
+                    echo "[$LOG_TIME] FALHA: Tentativa de cópia interrompida. HDD Externo desconectado." >> "$ARQUIVO_LOG" 2>/dev/null
+                    
+                    read -p "Por favor, conecte o HDD Externo e pressione [Enter] para tentar novamente (ou 'sair'): " opcao_conexao
+                    if [ "$(echo "$opcao_conexao" | tr '[:upper:]' '[:lower:]')" = "sair" ]; then
+                        echo "Transferência cancelada pelo operador."
+                        break 2 # Quebra o loop do arquivo atual e o loop principal do 'for'
+                    fi
+                else
+                    # HDD conectado com sucesso, avança para validar o espaço
+                    break
+                fi
+            done
+
+            # Se o operador escolheu sair no passo anterior, interrompe o fluxo
+            [ ! -d "$HDD_EXTERNO" ] && break
+
+            # 2. Validação de Espaço Disponível em Tempo de Execução (em Kilobytes)
+            espaco_livre_hd=$(df "$HDD_EXTERNO" | tail -1 | awk '{print $4}')
+            tamanho_arquivo=$(du -k "$arquivo_origem" | awk '{print $1}')
+               
+            if [ "$tamanho_arquivo" -gt "$espaco_livre_hd" ]; then
+                LOG_TIME=$(date "+%Y%m%d-%H%M%S")
+                echo -e "${VERMELHO}[FALTA DE ESPAÇO] Espaço insuficiente no HDD Externo para copiar $nome_bkp${PADRAO}"
+                echo "[$LOG_TIME] FALHA: Espaço insuficiente no HDD Externo para o arquivo $nome_bkp." >> "$ARQUIVO_LOG" 2>/dev/null
+                echo "Por favor, faça uma verificação de espaço no seu disco externo."
+                break # Interrompe a rotina e vai para o FINAL DA ROTINA conforme planejado
+            fi
+               
+            # 3. Execução da Cópia Física Segura
+            LOG_TIME=$(date "+%Y%m%d-%H%M%S")
+            echo -e "[Cópia]   Transferindo $nome_bkp..."
+            if cp "$arquivo_origem" "$HDD_EXTERNO/"; then
+                echo -e "${VERDE}[SUCESSO]${PADRAO} Arquivo copiado para o HDD Externo: $nome_bkp"
+                echo "[$LOG_TIME] SUCESSO - Transferido para HDD: $nome_bkp" >> "$ARQUIVO_LOG" 2>/dev/null
+                
+                # Se rodou como root/sudo, ajusta o dono do arquivo copiado para o usuário real no HD externo
+                if [ "$REAL_USER" != "root" ]; then
+                    chown "$REAL_USER":"$(id -gn "$REAL_USER")" "$HDD_EXTERNO/$nome_bkp" 2>/dev/null
+                fi
+            else
+                echo -e "${VERMELHO}[FALHA]${PADRAO} Erro crítico ao copiar o arquivo: $nome_bkp"
+                echo "[$LOG_TIME] FALHA: Falha na execução do comando cp para $nome_bkp" >> "$ARQUIVO_LOG" 2>/dev/null
+                echo "Orienta-se efetuar o procedimento manual para este item."
+            fi
+        done
+
+        #======================================================
+        #  5. ROTINA DE LIMPEZA DOS ARQUIVOS LOCAIS - OPCIONAL
+	      #======================================================
+	      echo "=========================================================================="
+        read -p "Deseja APAGAR os arquivos compactados locais da pasta $BACKUP_DIR? (s/n): " resp_limpar
+        resp_limpar=$(echo "$resp_limpar" | tr '[:upper:]' '[:lower:]')
+
+        if [ "$resp_limpar" = "s" ] || [ "$resp_limpar" = "sim" ]; then
+            LOG_TIME=$(date "+%Y%m%d-%H%M%S")
+            # Remove os arquivos compactados locais preservando o diretório pai intacto
+            rm -f "$BACKUP_DIR"/*.tar.zst 2>/dev/null
+            echo -e "${VERDE}[LIMPEZA] Arquivos locais removidos com sucesso. Diretório preservado.${PADRAO}"
+            echo "[$LOG_TIME] LIMPEZA: Arquivos locais de backup foram apagados pelo usuário." >> "$ARQUIVO_LOG" 2>/dev/null
+        else
+            LOG_TIME=$(date "+%Y%m%d-%H%M%S")
+            echo -e "[MANUTENÇÃO] Os arquivos de backup continuam armazenados em: $BACKUP_DIR"
+            echo "[$LOG_TIME] MANUTENÇÃO: Arquivos locais preservados no diretório." >> "$ARQUIVO_LOG" 2>/dev/null
+        fi
+    fi
+fi
+#================
+#  FIM DA ROTINA
+#================
